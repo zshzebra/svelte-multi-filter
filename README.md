@@ -1,58 +1,237 @@
-# create-svelte
+# Svelte Multi-Filter Store
 
-Everything you need to build a Svelte library, powered by [`create-svelte`](https://github.com/sveltejs/kit/tree/main/packages/create-svelte).
+A lightweight, type-safe multi-dimensional filter store for Svelte applications. This package provides a reactive way to handle complex filtering scenarios with multiple interdependent criteria.
 
-Read more about creating a library [in the docs](https://svelte.dev/docs/kit/packaging).
+## Features
 
-## Creating a project
+- 🎯 **Type-safe**: Built with TypeScript for robust type checking
+- ⚡ **Reactive**: Powered by Svelte stores for automatic updates
+- 🔄 **Interdependent Filters**: Smart handling of filter dependencies
+- 🎨 **Framework Agnostic UI**: Bring your own components
+- 📦 **Zero Dependencies**: Only requires Svelte as a peer dependency
 
-If you're seeing this, you've probably already done this step. Congrats!
+## Installation
 
-```bash
-# create a new project in the current directory
-npx sv create
-
-# create a new project in my-app
-npx sv create my-app
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+Using Bun (recommended):
 
 ```bash
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+bunx jsr add @zshzebra/svelte-multi-filter
 ```
 
-Everything inside `src/lib` is part of your library, everything inside `src/routes` can be used as a showcase or preview app.
-
-## Building
-
-To build your library:
+Using npm:
 
 ```bash
-npm run package
+npx jsr add @zshzebra/svelte-multi-filter
 ```
 
-To create a production version of your showcase app:
+Using pnpm:
 
 ```bash
-npm run build
+pnpm dlx jsr add @zshzebra/svelte-multi-filter
 ```
 
-You can preview the production build with `npm run preview`.
+## Quick Start
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+```typescript
+import { createMultiFilterStore } from 'svelte-multi-filter-store';
 
-## Publishing
+// Define your data structure
+interface Product {
+	category: string;
+	color: string;
+	size: string;
+}
 
-Go into the `package.json` and give your package the desired name through the `"name"` option. Also consider adding a `"license"` field and point it to a `LICENSE` file which you can create from a template (one popular option is the [MIT license](https://opensource.org/license/mit/)).
+// Your data
+const products = [
+	{ category: 'Shirt', color: 'Red', size: 'M' },
+	{ category: 'Pants', color: 'Blue', size: 'L' }
+];
 
-To publish your library to [npm](https://www.npmjs.com):
+// Configure filter properties
+const properties = {
+	category: {
+		name: 'Category',
+		options: ['Shirt', 'Pants', 'Jacket']
+	},
+	color: {
+		name: 'Color',
+		options: ['Red', 'Blue', 'Black']
+	}
+};
 
-```bash
-npm publish
+// Create the filter store
+const filterStore = createMultiFilterStore(products, properties);
 ```
+
+## Usage in Svelte Components
+
+```svelte
+<script lang="ts">
+	// Create store as shown above
+	let filteredItems: Product[] = [];
+
+	// Subscribe to filtered items changes
+	filterStore.subscribe((items) => {
+		filteredItems = items;
+	});
+
+	// Get available options for a specific property
+	$: categoryOptions = filterStore.getAvailableOptions('category');
+	$: colorOptions = filterStore.getAvailableOptions('color');
+
+	// Update a property value
+	function updateCategory(value: string) {
+		filterStore.updateProperty('category', value);
+	}
+</script>
+
+<!-- Implement your own filter UI components -->
+<div class="filters">
+	<!-- Example of a basic filter group -->
+	<div class="filter-group">
+		<h3>Category</h3>
+		<label>
+			<input
+				type="radio"
+				name="category"
+				value="Any"
+				checked={$filterStore.store['category'] === 'Any'}
+				on:change={() => updateCategory('Any')}
+			/>
+			Any
+		</label>
+		{#each categoryOptions as option}
+			<label>
+				<input
+					type="radio"
+					name="category"
+					value={option}
+					checked={$filterStore.store['category'] === option}
+					on:change={() => updateCategory(option)}
+				/>
+				{option}
+			</label>
+		{/each}
+	</div>
+</div>
+
+<!-- Results -->
+<div class="results">
+	<h3>Results ({filteredItems.length} items)</h3>
+	<ul>
+		{#each filteredItems as item}
+			<li>{JSON.stringify(item)}</li>
+		{/each}
+	</ul>
+</div>
+```
+
+## API Reference
+
+### `createMultiFilterStore<T>`
+
+Creates a new filter store for items of type `T`.
+
+```typescript
+function createMultiFilterStore<T extends Record<string, PropertyValue>>(
+	items: T[],
+	properties: { [K in keyof Partial<T>]: FilterProperty<T[K]> }
+): FilterStore<T>;
+```
+
+#### Parameters
+
+- `items`: Array of items to filter
+- `properties`: Configuration object for filter properties
+
+#### Returns
+
+A `FilterStore` object with the following methods and properties:
+
+- `store`: Svelte writable store containing current filter state
+- `getAvailableOptions(propertyName: string)`: Get available options for a property
+- `getFilteredItems()`: Get current filtered items
+- `updateProperty(propertyName: string, value: PropertyValue | 'Any')`: Update a filter
+- `reset()`: Reset all filters to 'Any'
+- `subscribe(callback: (items: T[]) => void)`: Subscribe to filtered items changes
+
+### Types
+
+```typescript
+type PropertyValue = string | number;
+
+interface FilterProperty<T extends PropertyValue> {
+	name: string;
+	options: T[];
+}
+
+interface FilterState {
+	[key: string]: PropertyValue | 'Any';
+}
+```
+
+## Example Implementation Patterns
+
+### Basic Filter Group
+
+```svelte
+<script lang="ts">
+	export let name: string;
+	export let options: string[];
+	export let value: string | 'Any';
+	export let availableOptions: string[];
+
+	function handleChange(newValue: string | 'Any') {
+		filterStore.updateProperty(name, newValue);
+	}
+</script>
+
+<div class="filter-group">
+	<h3>{name}</h3>
+	<div class="options">
+		<label>
+			<input
+				type="radio"
+				{name}
+				value="Any"
+				checked={value === 'Any'}
+				on:change={() => handleChange('Any')}
+			/>
+			Any
+		</label>
+		{#each options as option}
+			{@const isAvailable = availableOptions.includes(option)}
+			<label class:disabled={!isAvailable}>
+				<input
+					type="radio"
+					{name}
+					value={option}
+					checked={value === option}
+					disabled={!isAvailable}
+					on:change={() => handleChange(option)}
+				/>
+				{option}
+			</label>
+		{/each}
+	</div>
+</div>
+```
+
+## TypeScript Support
+
+The package is written in TypeScript and includes full type definitions. Generic types allow for type-safe filtering of your data structures.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## License
+
+MIT License - see the [LICENSE](LICENSE) file for details

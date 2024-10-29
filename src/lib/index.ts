@@ -1,198 +1,151 @@
 /**
- * @file MultiFilterStore.ts
- * @description A reactive multi-dimensional filter store for Svelte applications
+ * @fileoverview Multi-dimensional filter store for Svelte applications.
  * @version 1.0.0
  */
 
-import { writable, type Writable } from 'svelte/store';
+import { writable, derived } from 'svelte/store';
 
-/** Represents a value that can be used as a filter property */
-export type PropertyValue = string | number;
-
-/** Configuration for a filter property */
-export interface FilterProperty<T extends PropertyValue> {
-	/** Display name for the property */
-	name: string;
-	/** Available options for this property */
+/**
+ * Represents a value that can be used as a filter dimension's option
+ * @template T The type of the option value
+ */
+export type FilterDimension<T> = {
+	/** Available options for this dimension */
 	options: T[];
-}
+	/** Currently selected value, can be a specific option or 'Any' */
+	selected: T | 'Any';
+};
 
-/** Current state of the filter selections */
-export interface FilterState {
-	[key: string]: PropertyValue | 'Any';
-}
+/**
+ * Configuration object defining the possible values for each filter dimension
+ * @template T The type containing the filter dimensions
+ */
+export type FilterConfig<T extends Record<string, unknown>> = {
+	/** Array of possible values for each dimension */
+	[K in keyof T]: T[K][];
+};
 
-/** Result of creating a filter store */
-export interface FilterStore<T extends Record<string, PropertyValue>> {
-	/** Svelte store containing the current filter state */
-	store: Writable<FilterState>;
-	/** Get available options for a specific property based on current selections */
-	getAvailableOptions: (propertyName: string) => PropertyValue[];
-	/** Get items filtered according to current selections */
-	getFilteredItems: () => T[];
-	/** Update the value of a specific property */
-	updateProperty: (propertyName: string, value: PropertyValue | 'Any') => void;
-	/** Reset all filters to 'Any' */
-	reset: () => void;
-	/** Subscribe to filtered items changes */
-	subscribe: (callback: (items: T[]) => void) => () => void;
+/**
+ * Result of the filter store containing filtered items
+ * @template T The type of items being filtered
+ */
+export interface FilterResult<T> {
+	/** Subscribe to store changes */
+	subscribe: (callback: (value: T[]) => void) => () => void;
 }
 
 /**
  * Creates a multi-dimensional filter store
  *
- * @template T - The type of items being filtered
- * @param {T[]} items - Array of items to filter
- * @param {{ [K in keyof Partial<T>]: FilterProperty<T[K]> }} properties - Configuration for each filter property
- * @returns {FilterStore<T>} A filter store with methods for managing filters and accessing filtered items
+ * @template T The type of items being filtered
+ * @param {T[]} items Array of items to filter
+ * @param {FilterConfig<T>} config Configuration object containing arrays of possible values for each dimension
+ * @returns An object containing store subscription, filter operations, and derived values
  *
  * @example
  * ```typescript
  * interface Product {
- *   category: string;
- *   color: string;
- *   size: string;
+ *   category: 'Shirt' | 'Pants';
+ *   color: 'Red' | 'Blue';
  * }
  *
  * const products = [
- *   { category: 'Shirt', color: 'Red', size: 'M' },
- *   { category: 'Pants', color: 'Blue', size: 'L' }
+ *   { category: 'Shirt', color: 'Red' },
+ *   { category: 'Pants', color: 'Blue' }
  * ];
  *
- * const properties = {
- *   category: {
- *     name: 'Category',
- *     options: ['Shirt', 'Pants', 'Jacket']
- *   },
- *   color: {
- *     name: 'Color',
- *     options: ['Red', 'Blue', 'Black']
- *   }
+ * const config = {
+ *   category: ['Shirt', 'Pants'],
+ *   color: ['Red', 'Blue']
  * };
  *
- * const filterStore = createMultiFilterStore(products, properties);
+ * const filter = createFilterStore(products, config);
  * ```
  */
-export function createMultiFilterStore<T extends Record<string, PropertyValue>>(
+export function createFilterStore<T extends Record<string, unknown>>(
 	items: T[],
-	properties: { [K in keyof Partial<T>]: FilterProperty<T[K]> }
-): FilterStore<T> {
-	const ANY_OPTION = 'Any' as const;
+	config: FilterConfig<T>
+) {
+	// Initialize dimensions with 'Any' selected
+	const initialDimensions = Object.fromEntries(
+		Object.entries(config).map(([key, options]) => [key, { options, selected: 'Any' as const }])
+	) as { [K in keyof T]: FilterDimension<T[K]> };
 
-	// Initialize state
-	const initialState: FilterState = Object.keys(properties).reduce(
-		(acc, key) => ({
-			...acc,
-			[key]: ANY_OPTION
-		}),
-		{}
+	// Create the main store
+	const store = writable(initialDimensions);
+
+	/**
+	 * Updates the selected value for a dimension
+	 *
+	 * @template K The key of the dimension being updated
+	 * @param {K} dimension The dimension to update
+	 * @param {T[K] | 'Any'} value The new value to set
+	 */
+	function select<K extends keyof T>(dimension: K, value: T[K] | 'Any') {
+		store.update((dims) => ({
+			...dims,
+			[dimension]: {
+				...dims[dimension],
+				selected: value
+			}
+		}));
+	}
+
+	/**
+	 * Gets a derived store of available options for a dimension
+	 *
+	 * @template K The key of the dimension to get options for
+	 * @param {K} dimension The dimension to get options for
+	 * @returns {FilterResult<T[K]>} A derived store containing available options
+	 */
+	function getAvailableOptions<K extends keyof T>(dimension: K) {
+		return derived(store, ($store) => {
+			const otherDimensions = Object.entries($store)
+				.filter(([key]) => key !== dimension)
+				.map(([key, dim]) => ({
+					key,
+					selected: dim.selected
+				}));
+
+			const availableItems = items.filter((item) =>
+				otherDimensions.every(({ key, selected }) => selected === 'Any' || item[key] === selected)
+			);
+
+			const possibleValues = [...new Set(availableItems.map((item) => item[dimension]))] as T[K][];
+
+			return config[dimension].filter((option) => possibleValues.includes(option as T[K]));
+		});
+	}
+
+	/**
+	 * Derived store containing filtered items based on current selections
+	 * @type {FilterResult<T>}
+	 */
+	const filteredItems = derived(store, ($store) =>
+		items.filter((item) =>
+			Object.entries($store).every(
+				([key, dim]) => dim.selected === 'Any' || item[key] === dim.selected
+			)
+		)
 	);
 
-	// Create store
-	const filterStore = writable<FilterState>(initialState);
-	let currentState = initialState;
-
-	// Store subscription
-	filterStore.subscribe((value) => {
-		currentState = value;
-	});
-
 	/**
-	 * Gets all existing values for a property from the data
-	 * @internal
+	 * Resets all selections to 'Any'
 	 */
-	function getExistingValues(propertyName: string): PropertyValue[] {
-		return [...new Set(items.map((item) => item[propertyName]))];
-	}
-
-	/**
-	 * Gets available options for a property based on current selections
-	 * @param propertyName - Name of the property to get options for
-	 * @returns Array of available options
-	 */
-	function getAvailableOptions(propertyName: string): PropertyValue[] {
-		const property = properties[propertyName];
-		if (!property) return [];
-
-		const existingValues = getExistingValues(propertyName);
-
-		const otherProperties = Object.keys(currentState).filter((key) => key !== propertyName);
-		const allOthersAny = otherProperties.every((prop) => currentState[prop] === ANY_OPTION);
-
-		if (allOthersAny) {
-			return property.options.filter((option) => existingValues.includes(option));
-		}
-
-		const filteredItems = items.filter((item) => {
-			return Object.entries(currentState).every(([key, value]) => {
-				if (key === propertyName || value === ANY_OPTION) return true;
-				return item[key] === value;
-			});
-		});
-
-		const availableOptions = [...new Set(filteredItems.map((item) => item[propertyName]))];
-		return property.options.filter((option) => availableOptions.includes(option));
-	}
-
-	/**
-	 * Gets items filtered according to current selections
-	 * @returns Filtered array of items
-	 */
-	function getFilteredItems(): T[] {
-		return items.filter((item) => {
-			return Object.entries(currentState).every(([key, value]) => {
-				return value === ANY_OPTION || item[key] === value;
-			});
-		});
-	}
-
-	/**
-	 * Updates the value of a specific property
-	 * @param propertyName - Name of the property to update
-	 * @param value - New value for the property
-	 */
-	function updateProperty(propertyName: string, value: PropertyValue | typeof ANY_OPTION): void {
-		filterStore.update((state) => {
-			const newState = { ...state, [propertyName]: value };
-
-			// Reset invalid selections
-			Object.keys(state).forEach((key) => {
-				if (key === propertyName) return;
-
-				const availableOptions = getAvailableOptions(key);
-				if (newState[key] !== ANY_OPTION && !availableOptions.includes(newState[key])) {
-					newState[key] = ANY_OPTION;
-				}
-			});
-
-			return newState;
-		});
-	}
-
-	/**
-	 * Resets all filters to 'Any'
-	 */
-	function reset(): void {
-		filterStore.set(initialState);
-	}
-
-	/**
-	 * Subscribes to filtered items changes
-	 * @param callback - Function to call when filtered items change
-	 * @returns Unsubscribe function
-	 */
-	function subscribe(callback: (items: T[]) => void) {
-		return filterStore.subscribe(() => {
-			callback(getFilteredItems());
-		});
+	function reset() {
+		store.set(initialDimensions);
 	}
 
 	return {
-		store: filterStore,
+		/** Subscribe to dimension state changes */
+		subscribe: store.subscribe,
+		/** Update a dimension's selected value */
+		select,
+		/** Get available options for a dimension */
 		getAvailableOptions,
-		getFilteredItems,
-		updateProperty,
-		reset,
-		subscribe
+		/** Get filtered items based on current selections */
+		filteredItems,
+		/** Reset all selections to initial state */
+		reset
 	};
 }

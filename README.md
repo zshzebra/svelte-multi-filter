@@ -1,11 +1,11 @@
 # Svelte Multi-Filter Store
 
-A lightweight, type-safe multi-dimensional filter store for Svelte applications. This package provides a reactive way to handle complex filtering scenarios with multiple interdependent criteria.
+A lightweight, type-safe multi-dimensional filter store for Svelte 5 applications. This package provides a reactive way to handle complex filtering scenarios with multiple interdependent criteria.
 
 ## Features
 
 - 🎯 **Type-safe**: Built with TypeScript for robust type checking
-- ⚡ **Reactive**: Powered by Svelte stores for automatic updates
+- ⚡ **Reactive**: Built for Svelte 5 with runes
 - 🔄 **Interdependent Filters**: Smart handling of filter dependencies
 - 🎨 **Framework Agnostic UI**: Bring your own components
 - 📦 **Zero Dependencies**: Only requires Svelte as a peer dependency
@@ -33,62 +33,90 @@ pnpm dlx jsr add @zshzebra/svelte-multi-filter
 ## Quick Start
 
 ```typescript
-import { createMultiFilterStore } from 'svelte-multi-filter-store';
+import { createFilterStore, type FilterConfig } from '@zshzebra/svelte-multi-filter';
 
 // Define your data structure
 interface Product {
-	category: string;
-	color: string;
-	size: string;
+	category: 'Shirt' | 'Pants' | 'Jacket';
+	color: 'Red' | 'Blue' | 'Black';
 }
 
 // Your data
 const products = [
-	{ category: 'Shirt', color: 'Red', size: 'M' },
-	{ category: 'Pants', color: 'Blue', size: 'L' }
+	{ category: 'Shirt', color: 'Red' },
+	{ category: 'Pants', color: 'Blue' },
+	{ category: 'Shirt', color: 'Black' }
 ];
 
-// Configure filter properties
-const properties = {
-	category: {
-		name: 'Category',
-		options: ['Shirt', 'Pants', 'Jacket']
-	},
-	color: {
-		name: 'Color',
-		options: ['Red', 'Blue', 'Black']
-	}
-};
+// Configure filter options
+const config = {
+	category: ['Shirt', 'Pants', 'Jacket'],
+	color: ['Red', 'Blue', 'Black']
+} satisfies FilterConfig<Product>;
 
 // Create the filter store
-const filterStore = createMultiFilterStore(products, properties);
+const filter = createFilterStore(products, config);
 ```
 
-## Usage in Svelte Components
+## Usage in Svelte 5 Components
 
 ```svelte
 <script lang="ts">
-	// Create store as shown above
-	let filteredItems: Product[] = [];
+	import {
+		createFilterStore,
+		type FilterConfig,
+		type FilterDimension
+	} from '@zshzebra/svelte-multi-filter';
 
-	// Subscribe to filtered items changes
-	filterStore.subscribe((items) => {
-		filteredItems = items;
+	interface Product {
+		category: 'Shirt' | 'Pants' | 'Jacket';
+		color: 'Red' | 'Blue' | 'Black';
+	}
+
+	const products = [
+		{ category: 'Shirt', color: 'Red' },
+		{ category: 'Pants', color: 'Blue' },
+		{ category: 'Shirt', color: 'Black' }
+	];
+
+	const config = {
+		category: ['Shirt', 'Pants', 'Jacket'],
+		color: ['Red', 'Blue', 'Black']
+	} satisfies FilterConfig<Product>;
+
+	const filter = createFilterStore(products, config);
+
+	// State for dimensions and results
+	let dimensions = $state<{
+		category: FilterDimension<string>;
+		color: FilterDimension<string>;
+	}>();
+	let results = $state<Product[]>([]);
+	let availableCategoryOptions = $state<string[]>([]);
+	let availableColorOptions = $state<string[]>([]);
+
+	// Subscribe to store changes
+	filter.subscribe((dims) => {
+		dimensions = dims;
 	});
 
-	// Get available options for a specific property
-	$: categoryOptions = filterStore.getAvailableOptions('category');
-	$: colorOptions = filterStore.getAvailableOptions('color');
+	// Subscribe to filtered items
+	filter.filteredItems.subscribe((items) => {
+		results = items;
+	});
 
-	// Update a property value
-	function updateCategory(value: string) {
-		filterStore.updateProperty('category', value);
-	}
+	// Subscribe to available options
+	filter.getAvailableOptions('category').subscribe((options) => {
+		availableCategoryOptions = options;
+	});
+
+	filter.getAvailableOptions('color').subscribe((options) => {
+		availableColorOptions = options;
+	});
 </script>
 
-<!-- Implement your own filter UI components -->
 <div class="filters">
-	<!-- Example of a basic filter group -->
+	<!-- Category Filter -->
 	<div class="filter-group">
 		<h3>Category</h3>
 		<label>
@@ -96,19 +124,50 @@ const filterStore = createMultiFilterStore(products, properties);
 				type="radio"
 				name="category"
 				value="Any"
-				checked={$filterStore.store['category'] === 'Any'}
-				on:change={() => updateCategory('Any')}
+				checked={dimensions?.category?.selected === 'Any'}
+				onchange={() => filter.select('category', 'Any')}
 			/>
 			Any
 		</label>
-		{#each categoryOptions as option}
+
+		{#each config.category as option}
 			<label>
 				<input
 					type="radio"
 					name="category"
 					value={option}
-					checked={$filterStore.store['category'] === option}
-					on:change={() => updateCategory(option)}
+					checked={dimensions?.category?.selected === option}
+					disabled={!availableCategoryOptions.includes(option)}
+					onchange={() => filter.select('category', option)}
+				/>
+				{option}
+			</label>
+		{/each}
+	</div>
+
+	<!-- Color Filter -->
+	<div class="filter-group">
+		<h3>Color</h3>
+		<label>
+			<input
+				type="radio"
+				name="color"
+				value="Any"
+				checked={dimensions?.color?.selected === 'Any'}
+				onchange={() => filter.select('color', 'Any')}
+			/>
+			Any
+		</label>
+
+		{#each config.color as option}
+			<label>
+				<input
+					type="radio"
+					name="color"
+					value={option}
+					checked={dimensions?.color?.selected === option}
+					disabled={!availableColorOptions.includes(option)}
+					onchange={() => filter.select('color', option)}
 				/>
 				{option}
 			</label>
@@ -116,106 +175,55 @@ const filterStore = createMultiFilterStore(products, properties);
 	</div>
 </div>
 
-<!-- Results -->
+<button onclick={() => filter.reset()}>Reset Filters</button>
+
 <div class="results">
-	<h3>Results ({filteredItems.length} items)</h3>
-	<ul>
-		{#each filteredItems as item}
-			<li>{JSON.stringify(item)}</li>
-		{/each}
-	</ul>
+	<h3>Results ({results.length})</h3>
+	{#each results as item}
+		<div>{JSON.stringify(item)}</div>
+	{/each}
 </div>
 ```
 
 ## API Reference
 
-### `createMultiFilterStore<T>`
+### `createFilterStore<T>`
 
 Creates a new filter store for items of type `T`.
 
 ```typescript
-function createMultiFilterStore<T extends Record<string, PropertyValue>>(
+function createFilterStore<T extends Record<string, any>>(
 	items: T[],
-	properties: { [K in keyof Partial<T>]: FilterProperty<T[K]> }
+	config: FilterConfig<T>
 ): FilterStore<T>;
 ```
 
 #### Parameters
 
 - `items`: Array of items to filter
-- `properties`: Configuration object for filter properties
+- `config`: Configuration object containing arrays of possible values for each dimension
 
 #### Returns
 
-A `FilterStore` object with the following methods and properties:
+A filter store object with the following methods and properties:
 
-- `store`: Svelte writable store containing current filter state
-- `getAvailableOptions(propertyName: string)`: Get available options for a property
-- `getFilteredItems()`: Get current filtered items
-- `updateProperty(propertyName: string, value: PropertyValue | 'Any')`: Update a filter
-- `reset()`: Reset all filters to 'Any'
-- `subscribe(callback: (items: T[]) => void)`: Subscribe to filtered items changes
+- `subscribe`: Subscribe to dimension state changes
+- `select`: Update a dimension's selected value
+- `getAvailableOptions`: Get a derived store of available options for a dimension
+- `filteredItems`: Derived store of filtered items based on current selections
+- `reset`: Reset all selections to 'Any'
 
 ### Types
 
 ```typescript
-type PropertyValue = string | number;
-
-interface FilterProperty<T extends PropertyValue> {
-	name: string;
+export type FilterDimension<T> = {
 	options: T[];
-}
+	selected: T | 'Any';
+};
 
-interface FilterState {
-	[key: string]: PropertyValue | 'Any';
-}
-```
-
-## Example Implementation Patterns
-
-### Basic Filter Group
-
-```svelte
-<script lang="ts">
-	export let name: string;
-	export let options: string[];
-	export let value: string | 'Any';
-	export let availableOptions: string[];
-
-	function handleChange(newValue: string | 'Any') {
-		filterStore.updateProperty(name, newValue);
-	}
-</script>
-
-<div class="filter-group">
-	<h3>{name}</h3>
-	<div class="options">
-		<label>
-			<input
-				type="radio"
-				{name}
-				value="Any"
-				checked={value === 'Any'}
-				on:change={() => handleChange('Any')}
-			/>
-			Any
-		</label>
-		{#each options as option}
-			{@const isAvailable = availableOptions.includes(option)}
-			<label class:disabled={!isAvailable}>
-				<input
-					type="radio"
-					{name}
-					value={option}
-					checked={value === option}
-					disabled={!isAvailable}
-					on:change={() => handleChange(option)}
-				/>
-				{option}
-			</label>
-		{/each}
-	</div>
-</div>
+export type FilterConfig<T extends Record<string, any>> = {
+	[K in keyof T]: T[K][];
+};
 ```
 
 ## TypeScript Support

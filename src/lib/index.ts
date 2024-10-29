@@ -3,7 +3,7 @@
  * @version 1.0.0
  */
 
-import { writable, derived } from 'svelte/store';
+import { writable, derived, type Writable } from 'svelte/store';
 
 /**
  * Represents a value that can be used as a filter dimension's option
@@ -26,13 +26,24 @@ export type FilterConfig<T extends Record<string, unknown>> = {
 };
 
 /**
- * Result of the filter store containing filtered items
- * @template T The type of items being filtered
+ * Store subscription type
  */
-export interface FilterResult<T> {
-	/** Subscribe to store changes */
-	subscribe: (callback: (value: T[]) => void) => () => void;
-}
+export type StoreSubscription<T> = {
+	subscribe: (callback: (value: T) => void) => () => void;
+};
+
+/**
+ * Filter store return type
+ */
+export type FilterStore<T extends Record<string, unknown>> = {
+	subscribe: (
+		callback: (dimensions: { [K in keyof T]: FilterDimension<T[K]> }) => void
+	) => () => void;
+	select: <K extends keyof T>(dimension: K, value: T[K] | 'Any') => void;
+	getAvailableOptions: <K extends keyof T>(dimension: K) => StoreSubscription<T[K][]>;
+	filteredItems: StoreSubscription<T[]>;
+	reset: () => void;
+};
 
 /**
  * Creates a multi-dimensional filter store
@@ -40,48 +51,24 @@ export interface FilterResult<T> {
  * @template T The type of items being filtered
  * @param {T[]} items Array of items to filter
  * @param {FilterConfig<T>} config Configuration object containing arrays of possible values for each dimension
- * @returns An object containing store subscription, filter operations, and derived values
- *
- * @example
- * ```typescript
- * interface Product {
- *   category: 'Shirt' | 'Pants';
- *   color: 'Red' | 'Blue';
- * }
- *
- * const products = [
- *   { category: 'Shirt', color: 'Red' },
- *   { category: 'Pants', color: 'Blue' }
- * ];
- *
- * const config = {
- *   category: ['Shirt', 'Pants'],
- *   color: ['Red', 'Blue']
- * };
- *
- * const filter = createFilterStore(products, config);
- * ```
+ * @returns {FilterStore<T>} Store and methods for filtering
  */
 export function createFilterStore<T extends Record<string, unknown>>(
 	items: T[],
 	config: FilterConfig<T>
-) {
+): FilterStore<T> {
 	// Initialize dimensions with 'Any' selected
-	const initialDimensions = Object.fromEntries(
+	const initialDimensions: { [K in keyof T]: FilterDimension<T[K]> } = Object.fromEntries(
 		Object.entries(config).map(([key, options]) => [key, { options, selected: 'Any' as const }])
 	) as { [K in keyof T]: FilterDimension<T[K]> };
 
 	// Create the main store
-	const store = writable(initialDimensions);
+	const store: Writable<typeof initialDimensions> = writable(initialDimensions);
 
 	/**
 	 * Updates the selected value for a dimension
-	 *
-	 * @template K The key of the dimension being updated
-	 * @param {K} dimension The dimension to update
-	 * @param {T[K] | 'Any'} value The new value to set
 	 */
-	function select<K extends keyof T>(dimension: K, value: T[K] | 'Any') {
+	function select<K extends keyof T>(dimension: K, value: T[K] | 'Any'): void {
 		store.update((dims) => ({
 			...dims,
 			[dimension]: {
@@ -93,12 +80,8 @@ export function createFilterStore<T extends Record<string, unknown>>(
 
 	/**
 	 * Gets a derived store of available options for a dimension
-	 *
-	 * @template K The key of the dimension to get options for
-	 * @param {K} dimension The dimension to get options for
-	 * @returns {FilterResult<T[K]>} A derived store containing available options
 	 */
-	function getAvailableOptions<K extends keyof T>(dimension: K) {
+	function getAvailableOptions<K extends keyof T>(dimension: K): StoreSubscription<T[K][]> {
 		return derived(store, ($store) => {
 			const otherDimensions = Object.entries($store)
 				.filter(([key]) => key !== dimension)
@@ -119,9 +102,8 @@ export function createFilterStore<T extends Record<string, unknown>>(
 
 	/**
 	 * Derived store containing filtered items based on current selections
-	 * @type {FilterResult<T>}
 	 */
-	const filteredItems = derived(store, ($store) =>
+	const filteredItems: StoreSubscription<T[]> = derived(store, ($store) =>
 		items.filter((item) =>
 			Object.entries($store).every(
 				([key, dim]) => dim.selected === 'Any' || item[key] === dim.selected
@@ -132,20 +114,15 @@ export function createFilterStore<T extends Record<string, unknown>>(
 	/**
 	 * Resets all selections to 'Any'
 	 */
-	function reset() {
+	function reset(): void {
 		store.set(initialDimensions);
 	}
 
 	return {
-		/** Subscribe to dimension state changes */
 		subscribe: store.subscribe,
-		/** Update a dimension's selected value */
 		select,
-		/** Get available options for a dimension */
 		getAvailableOptions,
-		/** Get filtered items based on current selections */
 		filteredItems,
-		/** Reset all selections to initial state */
 		reset
 	};
 }

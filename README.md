@@ -2,6 +2,8 @@
 
 A lightweight, type-safe multi-dimensional filter store for Svelte 5 applications. This package provides a reactive way to handle complex filtering scenarios with multiple interdependent criteria.
 
+[Demo](https://zshzebra.github.io/multi-filter-demo/)
+
 ## Features
 
 - 🎯 **Type-safe**: Built with TypeScript for robust type checking
